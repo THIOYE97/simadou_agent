@@ -1,0 +1,18 @@
+services:
+  - type: worker                      # Background Worker (no HTTP port needed)
+    name: sanctions-agent
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m sanctions_agent.main
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: screening-prod-db     # ← change to your Render DB name
+          property: connectionString
+      - key: RUN_HOUR_UTC
+        value: "18"
+      - key: RUN_MINUTE_UTC
+        value: "0"
+      - key: LOG_LEVEL
+        value: "INFO"
+    plan: starter                     # free tier works; upgrade for reliability
