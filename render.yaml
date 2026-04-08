@@ -2,7 +2,7 @@ services:
   - type: worker                      # Background Worker (no HTTP port needed)
     name: sanctions-agent
     runtime: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r sanctions_agent/requirements.txt
     startCommand: python -m sanctions_agent.main
     envVars:
       - key: DATABASE_URL
