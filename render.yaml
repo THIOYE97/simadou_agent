@@ -14,8 +14,10 @@ services:
         value: 3.11.10
       - key: LOG_LEVEL
         value: "INFO"
-      # Brevo (set values manually in Render dashboard)
-      - key: BREVO_API_KEY
+      # Brevo SMTP (set values manually in Render dashboard)
+      - key: BREVO_SMTP_LOGIN
+        sync: false
+      - key: BREVO_SMTP_KEY
         sync: false
       - key: BREVO_FROM_EMAIL
         sync: false

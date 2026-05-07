@@ -85,6 +85,40 @@ CREATE INDEX IF NOT EXISTS ix_entities_source_name
     ON entities (source_name);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_entities_source
     ON entities (source_name, source_id);
+
+-- Promote any FK pointing at entities.id from RESTRICT/NO ACTION to CASCADE,
+-- so wipe-by-source can succeed without violating referential integrity.
+DO $$
+DECLARE
+    rec RECORD;
+BEGIN
+    FOR rec IN
+        SELECT tc.table_name      AS tname,
+               tc.constraint_name AS cname,
+               kcu.column_name    AS fk_column
+        FROM   information_schema.table_constraints       tc
+        JOIN   information_schema.key_column_usage        kcu
+               USING (constraint_schema, constraint_name)
+        JOIN   information_schema.referential_constraints rc
+               USING (constraint_schema, constraint_name)
+        JOIN   information_schema.constraint_column_usage ccu
+               USING (constraint_schema, constraint_name)
+        WHERE  tc.constraint_type = 'FOREIGN KEY'
+          AND  ccu.table_name     = 'entities'
+          AND  ccu.column_name    = 'id'
+          AND  rc.delete_rule    IN ('NO ACTION', 'RESTRICT')
+    LOOP
+        EXECUTE format('ALTER TABLE %I DROP CONSTRAINT %I',
+                       rec.tname, rec.cname);
+        EXECUTE format(
+            'ALTER TABLE %I ADD CONSTRAINT %I '
+            'FOREIGN KEY (%I) REFERENCES entities(id) ON DELETE CASCADE',
+            rec.tname, rec.cname, rec.fk_column
+        );
+        RAISE NOTICE 'Promoted FK %.% to ON DELETE CASCADE', rec.tname, rec.cname;
+    END LOOP;
+END;
+$$;
 """
 
 _FK_INTROSPECT = """
