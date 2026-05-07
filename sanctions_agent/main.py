@@ -4,14 +4,14 @@ Sanctions Agent – main entry point.
 Daily sync at RUN_HOUR_UTC:RUN_MINUTE_UTC (default 18:00 UTC).
 Manual trigger:  python -m sanctions_agent.main --run-now
 
-Full pipeline per run:
-  1. Fetch UN / OFAC / EU XML lists (with retry)
-  2. Parse → SanctionEntity objects
-  3. Delta diff → only new / modified entities
-  4. Upsert changed entities → DB
-  5. Soft-delete removed entities
-  6. Commit hashes
-  7. Notify via Slack / Email
+Pipeline per run:
+  1. Fetch UN / OFAC / EU XML lists (with retry).
+  2. Parse → SanctionEntity objects.
+  3. Compute delta (read-only) → stats (new / modified / unchanged / removed).
+  4. Wipe & reload by source: for each source that returned entities, delete
+     all rows in DB for that source_name, then insert the fresh batch.
+  5. Commit hashes to sanctions_sync_meta for next run's delta.
+  6. Notify via Brevo email (and Slack if configured).
 """
 import argparse
 import logging
@@ -23,13 +23,8 @@ from apscheduler.triggers.cron import CronTrigger
 
 from .config import LOG_LEVEL, RUN_HOUR_UTC, RUN_MINUTE_UTC
 from .notifier import notify_sync_complete, notify_sync_failed
-from .delta import (
-    commit_hashes,
-    compute_delta,
-    ensure_delta_schema,
-    soft_delete_removed,
-)
-from .upsert import ensure_schema, upsert_entities
+from .delta import commit_hashes, compute_delta, ensure_delta_schema
+from .upsert import ensure_schema, wipe_and_insert
 from . import eu, ofac, un
 
 logging.basicConfig(
@@ -48,9 +43,9 @@ def run_sync():
     all_entities = []
 
     sources = [
-        ("UN", un.fetch),
+        ("UN",   un.fetch),
         ("OFAC", ofac.fetch),
-        ("EU", eu.fetch),
+        ("EU",   eu.fetch),
     ]
     for name, fetch_fn in sources:
         try:
@@ -75,36 +70,33 @@ def run_sync():
         logger.error("No entities at all – aborting sync")
         notify_sync_complete(
             delta_stats={},
-            upsert_stats={"errors": 1},
+            upsert_stats={"errors": 1, "inserted": 0, "sources_wiped": 0},
             errors=fetch_errors,
             duration_seconds=time.monotonic() - start,
         )
         return
 
+    # Read-only delta for the report (does not drive the write).
     delta = compute_delta(all_entities)
     logger.info(
-        "Delta – to upsert: %d | to soft-delete: %d",
-        len(delta.to_upsert), len(delta.removed_ids),
-    )
-
-    upsert_stats = {"inserted": 0, "updated": 0, "errors": 0}
-    if delta.to_upsert:
-        upsert_stats = upsert_entities(delta.to_upsert)
-        commit_hashes(delta.to_upsert)
-    else:
-        logger.info("Nothing changed – skipping DB write")
-
-    soft_delete_removed(delta.removed_ids)
-
-    duration = time.monotonic() - start
-    logger.info(
-        "══ DONE (%.1fs) new=%d modified=%d unchanged=%d removed=%d errors=%d ══",
-        duration,
+        "Delta (stats only) – new=%d modified=%d unchanged=%d removed=%d",
         delta.stats.get("new", 0),
         delta.stats.get("modified", 0),
         delta.stats.get("unchanged", 0),
         delta.stats.get("removed", 0),
-        upsert_stats.get("errors", 0),
+    )
+
+    # Wipe & reload each source that returned data.
+    upsert_stats = wipe_and_insert(all_entities)
+    commit_hashes(all_entities)
+
+    duration = time.monotonic() - start
+    logger.info(
+        "══ DONE (%.1fs) inserted=%d sources_wiped=%d errors=%d ══",
+        duration,
+        upsert_stats.get("inserted", 0),
+        upsert_stats.get("sources_wiped", 0),
+        upsert_stats.get("errors", 0) + len(fetch_errors),
     )
 
     notify_sync_complete(
@@ -122,8 +114,8 @@ def main():
     args = parser.parse_args()
 
     logger.info("Sanctions Agent starting – checking DB schema …")
-    # ensure_schema()
-    # ensure_delta_schema()
+    ensure_schema()
+    ensure_delta_schema()
 
     if args.run_now:
         run_sync()

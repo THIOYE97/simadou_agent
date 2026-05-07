@@ -1,18 +1,28 @@
 services:
-  - type: worker                      # Background Worker (no HTTP port needed)
+  - type: cron                         # Render Cron Job (scale-to-zero)
     name: sanctions-agent
     runtime: python
+    schedule: "0 18 * * *"             # tous les jours 18:00 UTC
     buildCommand: pip install -r sanctions_agent/requirements.txt
-    startCommand: python -m sanctions_agent.main
+    startCommand: python -m sanctions_agent.main --run-now
     envVars:
       - key: DATABASE_URL
         fromDatabase:
-          name: screening-prod-db     # ← change to your Render DB name
+          name: screening-prod-db      # ← change to your Render DB name
           property: connectionString
-      - key: RUN_HOUR_UTC
-        value: "18"
-      - key: RUN_MINUTE_UTC
-        value: "0"
+      - key: PYTHON_VERSION
+        value: 3.11.10
       - key: LOG_LEVEL
         value: "INFO"
-    plan: starter                     # free tier works; upgrade for reliability
+      # Brevo (set values manually in Render dashboard)
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_FROM_EMAIL
+        sync: false
+      - key: BREVO_FROM_NAME
+        sync: false
+      - key: BREVO_TO_EMAIL
+        sync: false
+      # Slack (optional)
+      - key: SLACK_WEBHOOK_URL
+        sync: false
