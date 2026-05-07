@@ -142,3 +142,4 @@ def _build_entity_names(primary_raw: str, node: ET.Element) -> List[SanctionName
                 )
             )
     return names
+ 
