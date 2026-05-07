@@ -145,7 +145,7 @@ def commit_hashes(entities: List[SanctionEntity]):
             psycopg2.extras.execute_values(
                 cur,
                 """
-                INSERT INTO sanctions_sync_meta (source_id, source_name, content_hash, last_seen)
+                INSERT INTO sanctions_sync_meta (source_id, source_name, content_hash)
                 VALUES %s
                 ON CONFLICT (source_id) DO UPDATE SET
                     content_hash = EXCLUDED.content_hash,

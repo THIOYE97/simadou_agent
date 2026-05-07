@@ -88,7 +88,15 @@ def run_sync():
 
     # Wipe & reload each source that returned data.
     upsert_stats = wipe_and_insert(all_entities)
-    commit_hashes(all_entities)
+
+    # Persist hashes for next-run delta stats. Non-fatal: even if this
+    # fails, the data is already in the DB and the operator must still
+    # get the notification email.
+    try:
+        commit_hashes(all_entities)
+    except Exception as exc:
+        logger.error("commit_hashes failed (non-fatal): %s", exc)
+        fetch_errors.append(f"commit_hashes: {exc}")
 
     duration = time.monotonic() - start
     logger.info(
